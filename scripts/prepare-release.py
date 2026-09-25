@@ -44,7 +44,7 @@ def prepare(args):
            "--name", f"{component}-candidate", "--dir", str(args.output))
     expected = {f"sweep-{label}.tar.gz" for label in package.LABELS}
     if {p.name for p in args.output.iterdir()} != expected:
-        raise ValueError("candidate assets must contain exactly four sweep archives")
+        raise ValueError("candidate assets must contain exactly five sweep archives")
     for label in package.LABELS:
         with tarfile.open(args.output / f"sweep-{label}.tar.gz") as archive:
             names = set()
