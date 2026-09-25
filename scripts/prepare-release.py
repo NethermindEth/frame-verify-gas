@@ -59,10 +59,10 @@ def prepare(args):
                 names.add(member.name)
             required_files = ["verifier.hex", "calldata-invalid.hex", "gas.txt"]
             if label == "soispoke":
-                required_files += ["provenance.json", "trace.txt", "source/src/Groth16Verifier.sol",
+                required_files += ["provenance.json", "activation_manifest.testbed.json", "trace.txt", "source/src/Groth16Verifier.sol",
                                    "source/COPYING", "source/LICENSE.upstream-Apache-2.0",
                                    "source/README.md", "source/foundry.toml", "source/scripts/soispoke.py", "source/scripts/licenses/GPL-3.0.txt", "source/LICENSE.pipeline-MIT",
-                                   "source/test/Fixture.t.sol", "source/NOTICE", "source/tooling/patch_verifier.py"]
+                                   "source/test/Fixture.t.sol", "source/NOTICE", "source/upstream-foundry.toml", "source/tooling/patch_verifier.py"]
             else:
                 required_files += ["README.txt", "Verifier.sol", "proof.json", "metadata.json",
                                    "trace-valid.txt", "trace-invalid.txt"]
@@ -72,14 +72,42 @@ def prepare(args):
     digest = package.manifest(args.output)
     with tarfile.open(args.output / "sweep-soispoke.tar.gz") as archive:
         provenance = json.load(archive.extractfile("sweep-soispoke/provenance.json"))
+        manifest = json.load(archive.extractfile("sweep-soispoke/activation_manifest.testbed.json"))
+        measured_gas = int(archive.extractfile("sweep-soispoke/gas.txt").read())
     upstream_commit = provenance["commit"]
     if not re.fullmatch(r"[0-9a-f]{40}", upstream_commit):
         raise ValueError("missing pinned soispoke commit")
+    if (provenance.get("profile") != "position-notes-v2" or provenance.get("test_only") is not True
+            or provenance.get("declared_budget_gas") != 235800
+            or provenance.get("declared_verify_frame_gas") != 225000
+            or provenance.get("declared_recent_root_frame_gas") != 8000
+            or provenance.get("declared_signature_gas") != 2800
+            or provenance.get("measurements", {}).get("input", {}).get("gas") != measured_gas):
+        raise ValueError("soispoke candidate is not the pinned, measured position-notes-v2 profile")
+    if (manifest.get("production") is not False
+            or manifest.get("ceremony", {}).get("phase2_contributions") != 1
+            or manifest.get("ceremony", {}).get("independent_verification") is not None
+            or manifest.get("profile", {}).get("required_verify_budget") != 235800
+            or manifest.get("profile", {}).get("verify_frame_gas") != 225000
+            or manifest.get("profile", {}).get("recent_root_frame_gas") != 8000
+            or manifest.get("profile", {}).get("signature_gas") != 2800):
+        raise ValueError("soispoke manifest no longer identifies the approved test-only profile")
+    pinned_hashes = provenance.get("input_sha256", {})
+    with tarfile.open(args.output / "sweep-soispoke.tar.gz") as archive:
+        for upstream_path, packaged_path in (
+                ("activation_manifest.testbed.json", "sweep-soispoke/activation_manifest.testbed.json"),
+                ("contracts/src/Groth16Verifier.sol", "sweep-soispoke/source/src/Groth16Verifier.sol"),
+                ("contracts/foundry.toml", "sweep-soispoke/source/upstream-foundry.toml"),
+                ("tooling/patch_verifier.py", "sweep-soispoke/source/tooling/patch_verifier.py"),
+                ("LICENSE", "sweep-soispoke/source/LICENSE.upstream-Apache-2.0"),
+                ("NOTICE", "sweep-soispoke/source/NOTICE")):
+            if hashlib.sha256(archive.extractfile(packaged_path).read()).hexdigest() != pinned_hashes.get(upstream_path):
+                raise ValueError(f"packaged source does not match pinned input {upstream_path}")
     attestation = (f"Groth16 release sign-off\nversion: {args.version}\ncommit: {args.commit}\n"
                    f"SHA256SUMS-sha256: {digest}\n"
-                   "I reviewed the circuits, fresh per-circuit setups, valid and invalid pairing traces, "
-                   "gas calibration, upstream pin and hashes, and GPL-3.0 corresponding source and attribution. "
-                   "These disposable testbed artifacts are approved for benchmark publication.")
+                   "I reviewed the pinned circuit and verifier, disposable-setup disclosure, valid and invalid "
+                   "pairing traces, gas calibration, upstream pin and hashes, and GPL-3.0 corresponding source "
+                   "and attribution. These artifacts are benchmark-only and are not approved for securing value.")
     (args.output / "SIGNOFF-REQUIRED.txt").write_text(attestation + "\n")
     print(attestation)
     if args.signoff_comment:
@@ -91,7 +119,8 @@ def prepare(args):
                 or comment["user"]["login"].lower() == args.dispatcher.lower()
                 or comment["body"].strip() != attestation):
             raise ValueError("sign-off must come from an authorized reviewer and match these exact assets and version")
-        notes = (f"Benchmark-only disposable Groth16 setups; never use for production funds.\n\n"
+        notes = (f"Benchmark-only disposable Groth16 setups; never use for production funds.\n"
+                 f"The soispoke position-notes-v2 setup has one phase-2 contribution and no independent verification.\n\n"
                  f"Source commit: {args.commit}\n"
                  f"Pinned soispoke source: https://github.com/soispoke/minimal-shielded-pool/tree/{upstream_commit}\n"
                  f"Synthetic build: https://github.com/{args.repo}/actions/runs/{args.synthetic_run}\n"

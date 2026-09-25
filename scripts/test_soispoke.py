@@ -8,6 +8,17 @@ from unittest.mock import patch
 
 import soispoke
 
+PROFILE = {
+    "wire_profile": "position-notes-v2",
+    "pool_profile": "position-notes-v2",
+    "verify_frame_gas": 225000,
+    "recent_root_frame_gas": 8000,
+    "signature_gas": 2800,
+    "required_verify_budget": 235800,
+    "post_pr_12279_max_observed_verify_execution_gas": 210166,
+    "max_observed_recent_root_frame_gas": 5579,
+}
+
 
 class SourcePinTests(unittest.TestCase):
     def test_source_mutation_cannot_be_authorized_by_upstream_manifest(self):
@@ -19,13 +30,23 @@ class SourcePinTests(unittest.TestCase):
                 (source / name).write_bytes(b"reviewed")
                 hashes[name] = hashlib.sha256(b"reviewed").hexdigest()
             manifest_path = source / "activation_manifest.testbed.json"
-            manifest_path.write_text(json.dumps({"artifacts": hashes.copy()}))
+            manifest_path.write_text(json.dumps({
+                "production": False,
+                "ceremony": {"phase2_contributions": 1, "independent_verification": None},
+                "profile": PROFILE,
+                "artifacts": hashes.copy(),
+            }))
             with patch.object(soispoke, "HASHES", hashes), patch.object(soispoke, "run", return_value=soispoke.PIN):
                 soispoke.verify_source(source)
                 (source / "artifact-0").write_bytes(b"compromised")
                 upstream_hashes = hashes.copy()
                 upstream_hashes["artifact-0"] = hashlib.sha256(b"compromised").hexdigest()
-                manifest_path.write_text(json.dumps({"artifacts": upstream_hashes}))
+                manifest_path.write_text(json.dumps({
+                    "production": False,
+                    "ceremony": {"phase2_contributions": 1, "independent_verification": None},
+                    "profile": PROFILE,
+                    "artifacts": upstream_hashes,
+                }))
                 with self.assertRaisesRegex(ValueError, "independently pinned SHA256 mismatch"):
                     soispoke.verify_source(source)
 
@@ -42,6 +63,14 @@ class SourcePinTests(unittest.TestCase):
         with patch.object(soispoke, "run", return_value="0" * 40):
             with self.assertRaisesRegex(ValueError, "not the reviewed commit"):
                 soispoke.verify_source(Path("/not-accessed"))
+
+    def test_production_profile_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory)
+            (source / "activation_manifest.testbed.json").write_text(json.dumps({"production": True}))
+            with patch.object(soispoke, "HASHES", {}), patch.object(soispoke, "run", return_value=soispoke.PIN):
+                with self.assertRaisesRegex(ValueError, "not explicitly marked test-only"):
+                    soispoke.verify_source(source)
 
 
 if __name__ == "__main__":

@@ -12,13 +12,14 @@ test:
 clean:
 	rm -rf out cache
 
-# Current sweep ceilings verified on nethermind eip8141-frame-txs-devnet7:
-# a4d4306106170c9009e405d1b2819b5a6681e5b9 (2026-09-14).
+# Active campaign matrix: soispoke v2 at 235,800, synthetic controls at
+# 250k, 300k, 400k and 500k. The 100k point uses the non-Groth16 workloads.
 .PHONY: sweep synthetic-sweeps
 sweep:
 	python3 scripts/synthetic-sweep.py --target $(TARGET) --label $(or $(LABEL),$(TARGET)) --output $(or $(OUTPUT),artifacts) $(if $(ALLOW_DIRTY),--allow-dirty)
 
 synthetic-sweeps:
-	$(MAKE) sweep TARGET=236285 LABEL=236k
+	$(MAKE) sweep TARGET=250000 LABEL=250k
 	$(MAKE) sweep TARGET=300000 LABEL=300k
+	$(MAKE) sweep TARGET=400000 LABEL=400k
 	$(MAKE) sweep TARGET=500000 LABEL=500k

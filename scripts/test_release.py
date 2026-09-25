@@ -1,5 +1,6 @@
 import argparse
 import contextlib
+import hashlib
 import importlib.util
 import io
 import json
@@ -25,15 +26,45 @@ class ReleaseTests(unittest.TestCase):
         for label in release.package.LABELS:
             files = ["verifier.hex", "calldata-invalid.hex", "gas.txt"]
             if label == "soispoke":
-                files += ["provenance.json", "trace.txt", "source/src/Groth16Verifier.sol",
+                files += ["provenance.json", "activation_manifest.testbed.json", "trace.txt", "source/src/Groth16Verifier.sol",
                           "source/COPYING", "source/LICENSE.upstream-Apache-2.0",
                           "source/README.md", "source/foundry.toml", "source/scripts/soispoke.py", "source/scripts/licenses/GPL-3.0.txt", "source/LICENSE.pipeline-MIT",
-                          "source/test/Fixture.t.sol", "source/NOTICE", "source/tooling/patch_verifier.py"]
+                          "source/test/Fixture.t.sol", "source/NOTICE", "source/upstream-foundry.toml", "source/tooling/patch_verifier.py"]
             else:
                 files += ["README.txt", "Verifier.sol", "proof.json", "metadata.json", "trace-valid.txt", "trace-invalid.txt"]
+            manifest_data = json.dumps({
+                "production": False,
+                "ceremony": {"phase2_contributions": 1, "independent_verification": None},
+                "profile": {"required_verify_budget": 235800, "verify_frame_gas": 225000,
+                            "recent_root_frame_gas": 8000, "signature_gas": 2800},
+            }).encode()
             with tarfile.open(self.assets / f"sweep-{label}.tar.gz", "w:gz") as archive:
                 for filename in files:
-                    data = json.dumps({"commit": "a" * 40}).encode() if filename == "provenance.json" else b"evidence"
+                    if filename == "provenance.json":
+                        data = json.dumps({
+                            "commit": "a" * 40,
+                            "profile": "position-notes-v2",
+                            "test_only": True,
+                            "declared_budget_gas": 235800,
+                            "declared_verify_frame_gas": 225000,
+                            "declared_recent_root_frame_gas": 8000,
+                            "declared_signature_gas": 2800,
+                            "measurements": {"input": {"gas": 202307}},
+                            "input_sha256": {
+                                "activation_manifest.testbed.json": hashlib.sha256(manifest_data).hexdigest(),
+                                "contracts/src/Groth16Verifier.sol": hashlib.sha256(b"evidence").hexdigest(),
+                                "contracts/foundry.toml": hashlib.sha256(b"evidence").hexdigest(),
+                                "tooling/patch_verifier.py": hashlib.sha256(b"evidence").hexdigest(),
+                                "LICENSE": hashlib.sha256(b"evidence").hexdigest(),
+                                "NOTICE": hashlib.sha256(b"evidence").hexdigest(),
+                            },
+                        }).encode()
+                    elif filename == "activation_manifest.testbed.json":
+                        data = manifest_data
+                    elif filename == "gas.txt" and label == "soispoke":
+                        data = b"202307"
+                    else:
+                        data = b"evidence"
                     member = tarfile.TarInfo(f"sweep-{label}/{filename}")
                     member.size = len(data)
                     archive.addfile(member, io.BytesIO(data))
@@ -70,7 +101,7 @@ class ReleaseTests(unittest.TestCase):
         notes = (signed / "RELEASE-NOTES.md").read_text()
         self.assertIn("manusw7", notes)
         self.assertIn("a" * 40, notes)
-        self.assertEqual(len((signed / "SHA256SUMS").read_text().splitlines()), 4)
+        self.assertEqual(len((signed / "SHA256SUMS").read_text().splitlines()), 5)
 
     def test_rejects_unreviewed_or_changed_assets(self):
         output = self.prepare()
@@ -84,7 +115,7 @@ class ReleaseTests(unittest.TestCase):
         with patch.dict(self.comment["user"], {"type": "Bot"}):
             with self.assertRaisesRegex(ValueError, "sign-off"):
                 self.prepare("bot", 123)
-        asset = self.assets / "sweep-236k.tar.gz"
+        asset = self.assets / "sweep-250k.tar.gz"
         asset.write_bytes(asset.read_bytes() + b"changed")
         with self.assertRaisesRegex(ValueError, "sign-off"):
             self.prepare("changed", 123)
