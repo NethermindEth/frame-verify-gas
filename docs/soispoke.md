@@ -41,3 +41,7 @@ private-key fields from the upstream wallet fixture.
 The verifier source is marked GPL-3.0. The upstream repository's Apache-2.0 license does not replace that
 license. A named human maintainer with crypto and licensing context must review the exact release assets.
 Automated tests and agent review do not provide that approval.
+
+The v1.0.0 benchmark release has a recorded sign-off for its exact manifest and assets. That sign-off does
+not carry forward to this v2 profile. The v2 release remains pending the same named human review and exact
+asset sign-off.

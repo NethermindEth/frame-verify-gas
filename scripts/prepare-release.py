@@ -78,19 +78,15 @@ def prepare(args):
     if not re.fullmatch(r"[0-9a-f]{40}", upstream_commit):
         raise ValueError("missing pinned soispoke commit")
     if (provenance.get("profile") != "position-notes-v2" or provenance.get("test_only") is not True
-            or provenance.get("declared_budget_gas") != 235800
-            or provenance.get("declared_verify_frame_gas") != 225000
-            or provenance.get("declared_recent_root_frame_gas") != 8000
-            or provenance.get("declared_signature_gas") != 2800
+            or any(provenance.get(key) != value for key, value in package.SOISPOKE_PROFILE.items()
+                   if key.startswith("declared_"))
             or provenance.get("measurements", {}).get("input", {}).get("gas") != measured_gas):
         raise ValueError("soispoke candidate is not the pinned, measured position-notes-v2 profile")
     if (manifest.get("production") is not False
             or manifest.get("ceremony", {}).get("phase2_contributions") != 1
             or manifest.get("ceremony", {}).get("independent_verification") is not None
-            or manifest.get("profile", {}).get("required_verify_budget") != 235800
-            or manifest.get("profile", {}).get("verify_frame_gas") != 225000
-            or manifest.get("profile", {}).get("recent_root_frame_gas") != 8000
-            or manifest.get("profile", {}).get("signature_gas") != 2800):
+            or any(manifest.get("profile", {}).get(key) != value for key, value in package.SOISPOKE_PROFILE.items()
+                   if not key.startswith("declared_"))):
         raise ValueError("soispoke manifest no longer identifies the approved test-only profile")
     pinned_hashes = provenance.get("input_sha256", {})
     with tarfile.open(args.output / "sweep-soispoke.tar.gz") as archive:

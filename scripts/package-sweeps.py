@@ -12,6 +12,16 @@ import tarfile
 SYNTHETIC_LABELS = ("250k", "300k", "400k", "500k")
 SOISPOKE_LABELS = ("soispoke",)
 LABELS = SYNTHETIC_LABELS + SOISPOKE_LABELS
+SOISPOKE_PROFILE = {
+    "declared_budget_gas": 235800,
+    "declared_verify_frame_gas": 225000,
+    "declared_recent_root_frame_gas": 8000,
+    "declared_signature_gas": 2800,
+    "required_verify_budget": 235800,
+    "verify_frame_gas": 225000,
+    "recent_root_frame_gas": 8000,
+    "signature_gas": 2800,
+}
 
 
 def validate(root):
@@ -27,18 +37,14 @@ def validate(root):
         manifest = json.loads(manifest_path.read_text())
         pinned_hashes = provenance.get("input_sha256", {})
         if (provenance.get("profile") != "position-notes-v2" or provenance.get("test_only") is not True
-                or provenance.get("declared_budget_gas") != 235800
-                or provenance.get("declared_verify_frame_gas") != 225000
-                or provenance.get("declared_recent_root_frame_gas") != 8000
-                or provenance.get("declared_signature_gas") != 2800):
+                or any(provenance.get(key) != value for key, value in SOISPOKE_PROFILE.items()
+                       if key.startswith("declared_"))):
             raise ValueError(f"{root}: unexpected soispoke profile provenance")
         if (manifest.get("production") is not False
                 or manifest.get("ceremony", {}).get("phase2_contributions") != 1
                 or manifest.get("ceremony", {}).get("independent_verification") is not None
-                or manifest.get("profile", {}).get("required_verify_budget") != 235800
-                or manifest.get("profile", {}).get("verify_frame_gas") != 225000
-                or manifest.get("profile", {}).get("recent_root_frame_gas") != 8000
-                or manifest.get("profile", {}).get("signature_gas") != 2800):
+                or any(manifest.get("profile", {}).get(key) != value for key, value in SOISPOKE_PROFILE.items()
+                       if not key.startswith("declared_"))):
             raise ValueError(f"{root}: test-only setup or declared budget does not match the pinned profile")
         for upstream_path, packaged_path in (
                 ("activation_manifest.testbed.json", manifest_path),
@@ -58,7 +64,7 @@ def validate(root):
         if warning not in metadata.get("WARNING", "") or warning not in (root / "README.txt").read_text():
             raise ValueError(f"{root}: missing benchmark-only setup warning")
     ceiling = {"sweep-250k": 250000, "sweep-300k": 300000, "sweep-400k": 400000,
-               "sweep-500k": 500000, "sweep-soispoke": 235800}[root.name]
+               "sweep-500k": 500000, "sweep-soispoke": SOISPOKE_PROFILE["required_verify_budget"]}[root.name]
     if not 150000 < int((root / "gas.txt").read_text().strip()) <= ceiling:
         raise ValueError(f"{root}: implausible measured execution gas")
 
