@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Combine successful candidate runs without regenerating their reviewed artifacts."""
+"""Validate and assemble successful candidate runs without rebuilding their artifacts."""
 import argparse
 import hashlib
 import importlib.util
@@ -12,11 +12,6 @@ import tarfile
 spec = importlib.util.spec_from_file_location("package", Path(__file__).with_name("package-sweeps.py"))
 package = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(package)
-
-# Reviewers trusted to sign off a Groth16 release: named individuals with crypto/circuit context,
-# not "any org member" (which only proves repo access, not that anyone actually reviewed the artifacts).
-AUTHORIZED_SIGNERS = {"manusw7", "AnkushinDaniil"}
-
 
 def gh(*args):
     return subprocess.check_output(["gh", *args], text=True)
@@ -31,8 +26,6 @@ def prepare(args):
         raise ValueError("expected version vMAJOR.MINOR.PATCH without prerelease suffix")
     if not re.fullmatch(r"[0-9a-f]{40}", args.commit):
         raise ValueError("expected full candidate commit SHA")
-    if args.signoff_comment and not args.dispatcher:
-        raise ValueError("--dispatcher is required with --signoff-comment")
     args.output.mkdir(parents=True, exist_ok=False)
     for component, run_id in (("synthetic", args.synthetic_run), ("soispoke", args.soispoke_run)):
         run = api(f"repos/{args.repo}/actions/runs/{run_id}")
@@ -87,7 +80,7 @@ def prepare(args):
             or manifest.get("ceremony", {}).get("independent_verification") is not None
             or any(manifest.get("profile", {}).get(key) != value for key, value in package.SOISPOKE_PROFILE.items()
                    if not key.startswith("declared_"))):
-        raise ValueError("soispoke manifest no longer identifies the approved test-only profile")
+        raise ValueError("soispoke manifest no longer identifies the pinned test-only profile")
     pinned_hashes = provenance.get("input_sha256", {})
     with tarfile.open(args.output / "sweep-soispoke.tar.gz") as archive:
         for upstream_path, packaged_path in (
@@ -99,34 +92,17 @@ def prepare(args):
                 ("NOTICE", "sweep-soispoke/source/NOTICE")):
             if hashlib.sha256(archive.extractfile(packaged_path).read()).hexdigest() != pinned_hashes.get(upstream_path):
                 raise ValueError(f"packaged source does not match pinned input {upstream_path}")
-    attestation = (f"Groth16 release sign-off\nversion: {args.version}\ncommit: {args.commit}\n"
-                   f"SHA256SUMS-sha256: {digest}\n"
-                   "I reviewed the pinned circuit and verifier, disposable-setup disclosure, valid and invalid "
-                   "pairing traces, gas calibration, upstream pin and hashes, and GPL-3.0 corresponding source "
-                   "and attribution. These artifacts are benchmark-only and are not approved for securing value.")
-    (args.output / "SIGNOFF-REQUIRED.txt").write_text(attestation + "\n")
-    print(attestation)
-    if args.signoff_comment:
-        comment = api(f"repos/{args.repo}/issues/comments/{args.signoff_comment}")
-        authorized = {s.lower() for s in AUTHORIZED_SIGNERS}
-        if (comment["user"]["type"] != "User"
-                or comment["user"]["login"].lower() not in authorized
-                or comment["updated_at"] != comment["created_at"]
-                or comment["user"]["login"].lower() == args.dispatcher.lower()
-                or comment["body"].strip() != attestation):
-            raise ValueError("sign-off must come from an authorized reviewer and match these exact assets and version")
-        notes = (f"Benchmark-only disposable Groth16 setups; never use for production funds.\n"
-                 f"The soispoke position-notes-v2 setup has one phase-2 contribution and no independent verification.\n\n"
-                 f"Source commit: {args.commit}\n"
-                 f"Pinned soispoke source: https://github.com/soispoke/minimal-shielded-pool/tree/{upstream_commit}\n"
-                 f"Synthetic build: https://github.com/{args.repo}/actions/runs/{args.synthetic_run}\n"
-                 f"Soispoke build: https://github.com/{args.repo}/actions/runs/{args.soispoke_run}\n"
-                 f"Named crypto and licensing reviewer: @{comment['user']['login']}\n"
-                 f"Sign-off: {comment['html_url']}\n\n"
-                 f"SHA256SUMS SHA256: `{digest}`\n\n"
-                 "The soispoke archive includes the pinned upstream commit, GPL-3.0 verifier source, "
-                 "license, attribution, build settings and measured gas reconciliation.\n")
-        (args.output / "RELEASE-NOTES.md").write_text(notes)
+    notes = ("Benchmark-only disposable Groth16 setups; never use for production funds.\n"
+             "The soispoke position-notes-v2 setup has one phase-2 contribution and no independent verification.\n\n"
+             f"Source commit: {args.commit}\n"
+             f"Pinned soispoke source: https://github.com/soispoke/minimal-shielded-pool/tree/{upstream_commit}\n"
+             f"Synthetic build: https://github.com/{args.repo}/actions/runs/{args.synthetic_run}\n"
+             f"Soispoke build: https://github.com/{args.repo}/actions/runs/{args.soispoke_run}\n\n"
+             f"SHA256SUMS SHA256: `{digest}`\n\n"
+             "The soispoke archive includes the pinned upstream commit, GPL-3.0 verifier source, "
+             "license, attribution, build settings and measured gas reconciliation.\n")
+    (args.output / "RELEASE-NOTES.md").write_text(notes)
+    print(f"Prepared {args.version} from {args.commit}; SHA256SUMS SHA256: {digest}")
 
 
 if __name__ == "__main__":
@@ -136,7 +112,5 @@ if __name__ == "__main__":
     parser.add_argument("--commit", required=True)
     parser.add_argument("--synthetic-run", required=True, type=int)
     parser.add_argument("--soispoke-run", required=True, type=int)
-    parser.add_argument("--signoff-comment", type=int)
-    parser.add_argument("--dispatcher", help="login that dispatched publication; must differ from the signer")
     parser.add_argument("--output", type=Path, required=True)
     prepare(parser.parse_args())

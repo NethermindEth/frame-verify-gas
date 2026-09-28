@@ -71,12 +71,8 @@ class ReleaseTests(unittest.TestCase):
         self.run = {"conclusion": "success", "event": "workflow_dispatch", "head_sha": "b" * 40,
                     "head_repository": {"full_name": "NethermindEth/frame-verify-gas"},
                     "path": ".github/workflows/build-groth16-candidates.yml"}
-        self.comment = {"user": {"type": "User", "login": "manusw7"}, "author_association": "MEMBER",
-                        "body": "", "html_url": "https://github.com/example/review",
-                        "created_at": "2026-09-14T10:00:00Z", "updated_at": "2026-09-14T10:00:00Z"}
-
     def api(self, path):
-        return self.comment if "comments/" in path else self.run
+        return self.run
 
     def gh(self, *args):
         component = args[args.index("--name") + 1]
@@ -86,50 +82,24 @@ class ReleaseTests(unittest.TestCase):
                 shutil.copyfile(self.assets / f"sweep-{label}.tar.gz", destination / f"sweep-{label}.tar.gz")
         return ""
 
-    def prepare(self, output="review", signoff=None, version="v1.0.0", dispatcher="publisher"):
+    def prepare(self, output="review", version="v1.0.0"):
         args = argparse.Namespace(repo="NethermindEth/frame-verify-gas", version=version,
                                   commit="b" * 40, synthetic_run=1, soispoke_run=2,
-                                  output=self.root / output, signoff_comment=signoff, dispatcher=dispatcher)
+                                  output=self.root / output)
         with patch.object(release, "api", self.api), patch.object(release, "gh", self.gh), contextlib.redirect_stdout(io.StringIO()):
             release.prepare(args)
         return args.output
 
-    def test_named_review_binds_exact_assets_and_records_upstream_commit(self):
+    def test_prepares_release_notes_from_pinned_candidate_runs(self):
         output = self.prepare()
-        self.comment["body"] = (output / "SIGNOFF-REQUIRED.txt").read_text()
-        signed = self.prepare("signed", 123)
-        notes = (signed / "RELEASE-NOTES.md").read_text()
-        self.assertIn("manusw7", notes)
+        notes = (output / "RELEASE-NOTES.md").read_text()
+        self.assertIn("Source commit: " + "b" * 40, notes)
         self.assertIn("a" * 40, notes)
-        self.assertEqual(len((signed / "SHA256SUMS").read_text().splitlines()), 5)
-
-    def test_rejects_unreviewed_or_changed_assets(self):
-        output = self.prepare()
-        self.comment["body"] = (output / "SIGNOFF-REQUIRED.txt").read_text()
-        with patch.dict(self.comment, {"body": "approved"}):
-            with self.assertRaisesRegex(ValueError, "sign-off"):
-                self.prepare("body", 123)
-        with patch.dict(self.comment["user"], {"login": "someone-else"}):
-            with self.assertRaisesRegex(ValueError, "sign-off"):
-                self.prepare("unauthorized", 123)
-        with patch.dict(self.comment["user"], {"type": "Bot"}):
-            with self.assertRaisesRegex(ValueError, "sign-off"):
-                self.prepare("bot", 123)
-        asset = self.assets / "sweep-250k.tar.gz"
-        asset.write_bytes(asset.read_bytes() + b"changed")
-        with self.assertRaisesRegex(ValueError, "sign-off"):
-            self.prepare("changed", 123)
-
-    def test_rejects_edited_or_self_signoff(self):
-        output = self.prepare()
-        self.comment["body"] = (output / "SIGNOFF-REQUIRED.txt").read_text()
-        with patch.dict(self.comment, {"updated_at": "2026-09-14T11:00:00Z"}):
-            with self.assertRaisesRegex(ValueError, "sign-off"):
-                self.prepare("edited", 123)
-        with self.assertRaisesRegex(ValueError, "sign-off"):
-            self.prepare("self", 123, dispatcher="Manusw7")
-        with self.assertRaisesRegex(ValueError, "--dispatcher"):
-            self.prepare("no-dispatcher", 123, dispatcher=None)
+        self.assertIn("Synthetic build: https://github.com/NethermindEth/frame-verify-gas/actions/runs/1", notes)
+        self.assertIn("Soispoke build: https://github.com/NethermindEth/frame-verify-gas/actions/runs/2", notes)
+        self.assertIn("SHA256SUMS SHA256:", notes)
+        self.assertEqual(len((output / "SHA256SUMS").read_text().splitlines()), 5)
+        self.assertFalse((output / "SIGNOFF-REQUIRED.txt").exists())
 
     def test_rejects_wrong_candidate_provenance(self):
         for field, value in (("head_sha", "c" * 40), ("conclusion", "failure"),

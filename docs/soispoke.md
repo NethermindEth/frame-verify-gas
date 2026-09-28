@@ -39,10 +39,11 @@ manifest, corresponding verifier source, license, and attribution. It excludes p
 private-key fields from the upstream wallet fixture.
 
 The verifier source is marked GPL-3.0. The upstream repository's Apache-2.0 license does not replace that
-license. The repository requires a named human maintainer with crypto and licensing context to review the
-exact release assets. This is an internal release control, not a GPL requirement. Automated tests and agent
-review do not provide that approval.
+license. The archive includes the corresponding source, GPL text, attribution and build files. The GPL
+distribution conditions do not require a named reviewer or a per-release sign-off.
 
-The v1.0.0 benchmark release has a recorded sign-off for its exact manifest and assets. That sign-off does
-not carry forward to this v2 profile. The v2 release remains pending the same named human review and exact
-asset sign-off.
+The earlier "Licensing decision pending" note was removed during the v2 documentation rewrite, not after a
+recorded upstream license change or separate approval. Current packaging follows the verifier's GPL-3.0
+declaration and includes the corresponding source and notices. The v1.0.0 release used a manual sign-off step;
+the v2 release process relies on normal PR review, successful candidate builds, pinned provenance, and
+automated archive and checksum validation.

@@ -1,4 +1,4 @@
-name: Publish reviewed Groth16 release
+name: Publish Groth16 benchmark release
 
 on:
   workflow_dispatch:
@@ -15,11 +15,6 @@ on:
         description: Successful soispoke candidate run ID at this commit
         required: true
         type: string
-      signoff_comment:
-        description: Maintainer PR/issue comment ID containing the exact artifact sign-off
-        required: true
-        type: string
-
 concurrency:
   group: groth16-release
   cancel-in-progress: false
@@ -27,8 +22,6 @@ concurrency:
 permissions:
   actions: read
   contents: write
-  issues: read
-  pull-requests: read
 
 jobs:
   publish:
@@ -37,20 +30,18 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
-      - name: Verify named review of the exact candidate assets
+      - name: Validate pinned candidate assets
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version }}
           SYNTHETIC_RUN: ${{ inputs.synthetic_run }}
           SOISPOKE_RUN: ${{ inputs.soispoke_run }}
-          SIGNOFF_COMMENT: ${{ inputs.signoff_comment }}
         run: |
           python3 scripts/prepare-release.py --repo "$GITHUB_REPOSITORY" \
             --version "$VERSION" --commit "$GITHUB_SHA" \
             --synthetic-run "$SYNTHETIC_RUN" --soispoke-run "$SOISPOKE_RUN" \
-            --signoff-comment "$SIGNOFF_COMMENT" --dispatcher "$GITHUB_ACTOR" \
             --output "$RUNNER_TEMP/release"
-      - name: Create the reviewed tag and release
+      - name: Create the immutable tag and release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version }}

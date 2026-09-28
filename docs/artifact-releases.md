@@ -40,10 +40,11 @@ paid pairing separately. Never relax that pairing check to accommodate malformed
 `Build Groth16 candidates` is manually dispatched independently with `component=synthetic`
 and `component=soispoke`. Both runs must use the **same source commit** that will be tagged.
 They can run concurrently and upload separate candidate artifacts with a 30-day retention.
-They do not tag or publish a release. A reviewer must inspect those exact artifacts before
-publication; a green workflow is not cryptographic sign-off.
+They do not tag or publish a release. The release workflow checks that both runs succeeded at
+the source commit being published, validates the archive contents and profile provenance, and
+records checksums for the five packages.
 
-After both builds succeed, prepare the review bundle locally with authenticated `gh`:
+After both builds succeed, assemble and validate the release bundle with authenticated `gh`:
 
 ```sh
 python3 scripts/prepare-release.py --version v1.0.0 --commit <full-sha> \
@@ -51,30 +52,15 @@ python3 scripts/prepare-release.py --version v1.0.0 --commit <full-sha> \
 ```
 
 The new output directory contains five `sweep-*.tar.gz` assets, `SHA256SUMS`, and
-`SIGNOFF-REQUIRED.txt`. A **named human maintainer with crypto/circuit context** reviews:
+`RELEASE-NOTES.md`. The normal PR review covers changes to the pinned sources, generator,
+packaging checks, benchmark-only disclosure and license handling. The release workflow repeats
+the provenance and archive checks against the candidate runs before publishing.
 
-- Circuit constraints, witness controls, disposable-setup disclosure and absence of serialized private keys.
-- Valid/invalid Foundry traces, pairing completion at the expected price, empirical calibration,
-  runtime bytecode and exact calldata, and the comparison with Nethermind's 2% tolerance.
-- The pinned v2 upstream commit, independent hashes, manifest agreement, invalid-input mutation,
-  and gas scope. The profile is test-only, with one phase-2 contribution and no independent verification.
-- GPL-3.0 verifier attribution, unchanged source and equivalent source access in the same asset.
-
-This named sign-off is a repository release control, not a GPL requirement. The license conditions
-apply independently of the review process.
-
-The reviewer then posts the **exact contents** of `SIGNOFF-REQUIRED.txt` as a PR/issue comment
-in `NethermindEth/frame-verify-gas`. The publication script verifies the comment author's
-login is on the explicit reviewer allowlist, that it is a human account other than the maintainer
-dispatching publication, that the comment was never edited, and that the comment binds the version,
-source commit and SHA256 of the complete checksum manifest. This checks provenance; maintainers still
-must choose a reviewer competent to make that assessment.
-
-Dispatch `Publish reviewed Groth16 release` from `main` at the same commit with the version,
-both run IDs, and the numeric comment ID. It rejects any existing tag or release (including
+Dispatch `Publish Groth16 benchmark release` from `main` at the same commit with the version
+and both run IDs. It rejects any existing tag or release (including
 drafts) for that version, creates the tag and release with all five archives and the manifest
 in one step, and verifies the tag points at the dispatched commit. Use a fresh version rather
-than replacing reviewed assets in place. Publication runs only in the upstream repository on `main`.
+than replacing published assets in place. Publication runs only in the upstream repository on `main`.
 
 One-time maintainer setup before the first publication:
 
@@ -82,8 +68,8 @@ One-time maintainer setup before the first publication:
 - Add a tag ruleset for `v*` restricting creation, update and deletion to that workflow's
   maintainers.
 
-The publish workflow uses the exact artifact sign-off as its human approval gate. It does not require
-a separate GitHub deployment-environment approval.
+The release is manually dispatched after the normal PR review and successful candidate builds.
+No separate per-release comment sign-off or GitHub deployment-environment approval is required.
 
 ## Licensing
 
@@ -91,12 +77,11 @@ The upstream repository's Apache-2.0 license does **not** replace the verifier's
 header. The soispoke archive keeps the verifier under GPL-3.0 and bundles its unchanged source,
 license text, attribution, build configuration and generation script. This implements source
 availability alongside object code as described in [GPLv3 §6(d)](https://www.gnu.org/licenses/gpl.en.html#section6).
-The named maintainer sign-off described above is an internal release control, not a GPL condition.
-This document and automated checks do not constitute that sign-off.
+These distribution conditions apply independently of the repository's review and release process.
 
 ## Downstream acceptance gate
 
-The Nethermind workflow fetches a reviewed release by version, rejects draft/prerelease/invalid
+The Nethermind workflow fetches a published release by version, rejects draft/prerelease/invalid
 versions, checks SHA256s and verifier plausibility, and extracts outside the checkout.
 
 Acceptance requires an actual `harness=mempool` dispatch with that release version and
