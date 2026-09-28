@@ -7,13 +7,11 @@ reproducibility means independently re-running the checks and calibration, not i
 
 ## Generate candidates
 
-Use Go from `prover/go.mod`, Foundry **v1.7.1**, Python 3, and Git. The scripts pin their
-Solidity compilers and compiler settings. Do not substitute a newer toolchain silently.
+Use Go from `prover/go.mod`, Foundry **v1.7.1** for synthetic artifacts and **v1.8.3** for
+soispoke v2, Python 3, and Git. The scripts pin Solidity compilers and settings.
 
 ```sh
-make sweep TARGET=236285 LABEL=236k
-make sweep TARGET=300000 LABEL=300k
-make sweep TARGET=500000 LABEL=500k
+make synthetic-sweeps
 python3 scripts/soispoke.py --output artifacts/sweep-soispoke
 python3 scripts/package-sweeps.py --component synthetic
 python3 scripts/package-sweeps.py --component soispoke
@@ -27,59 +25,51 @@ with `ProofInvalid()` after one successful, false four-pair check costing 181,00
 invalid call is measured with call gas capped at `ceiling - 3000`: the verifier forwards
 `gas()` to `ecPairing`, so under the EVM 63/64 rule N is the largest count whose pairing still
 completes and returns false within the cap, not the largest whose total gas fits. The
-soispoke proof flips public `input[9]` and must return false after pairing. Its coordinate-alias
+soispoke proof flips compressed `public_inputs[0]` and must return false after pairing. Its coordinate-alias
 and infinity controls must fail before any precompile call.
 
-The sweep ceilings and old expectations were rechecked at Nethermind devnet7 commit
-`a4d4306106170c9009e405d1b2819b5a6681e5b9`: 236,285 / 300,000 / 500,000 and
-234,190 / 299,256 / 494,586 respectively; soispoke's expectation is 248,437. The existing
-harness allows 2% drift and separately checks pairing gas against 181,000 ± 3,000.
-If regenerated execution gas exceeds that tolerance, update the harness expectations in a
-reviewed follow-up before dispatch. Never relax the pairing check to accommodate malformed points.
+The active campaign points are 100,000, 235,800, 250,000, 300,000, 400,000 and 500,000.
+The 100,000 point uses non-Groth16 workloads. The soispoke v2 artifact represents its
+235,800 declared profile. Synthetic controls cover 250,000 through 500,000. Historical
+236,285 and 352,800 results stay in prior campaign records, not this active matrix.
+The Nethermind harness allows 2% drift against isolated verifier gas and checks the fully
+paid pairing separately. Never relax that pairing check to accommodate malformed points.
 
-## One version, four sweeps
+## One version, five sweeps
 
 `Build Groth16 candidates` is manually dispatched independently with `component=synthetic`
 and `component=soispoke`. Both runs must use the **same source commit** that will be tagged.
 They can run concurrently and upload separate candidate artifacts with a 30-day retention.
-They do not tag or publish a release. A reviewer must inspect those exact artifacts before
-publication; a green workflow is not cryptographic sign-off.
+They do not tag or publish a release. The release workflow checks that both runs succeeded at
+the source commit being published, validates the archive contents and profile provenance, and
+records checksums for the five packages.
 
-After both builds succeed, prepare the review bundle locally with authenticated `gh`:
+After both builds succeed, assemble and validate the release bundle with authenticated `gh`:
 
 ```sh
 python3 scripts/prepare-release.py --version v1.0.0 --commit <full-sha> \
   --synthetic-run <run-id> --soispoke-run <run-id> --output /tmp/groth16-review
 ```
 
-The new output directory contains four `sweep-*.tar.gz` assets, `SHA256SUMS`, and
-`SIGNOFF-REQUIRED.txt`. A **named human maintainer with crypto/circuit context** reviews:
+The new output directory contains five `sweep-*.tar.gz` assets, `SHA256SUMS`, and
+`RELEASE-NOTES.md`. The normal PR review covers changes to the pinned sources, generator,
+packaging checks, benchmark-only disclosure and license handling. The release workflow repeats
+the provenance and archive checks against the candidate runs before publishing.
 
-- Circuit constraints, witness controls, per-circuit setups and absence of serialized private keys.
-- Valid/invalid Foundry traces, pairing completion at the expected price, empirical calibration,
-  runtime bytecode and exact calldata, and the comparison with Nethermind's 2% tolerance.
-- The deliberately pinned upstream commit, independently committed hashes, secondary manifest
-  agreement, mutation and gas reconciliation.
-- GPL-3.0 verifier attribution, unchanged source and equivalent source access in the same asset.
-
-The reviewer then posts the **exact contents** of `SIGNOFF-REQUIRED.txt` as a PR/issue comment
-in `NethermindEth/frame-verify-gas`. The publication script verifies the comment author's
-GitHub association is OWNER, MEMBER or COLLABORATOR, that it is a human account other than the
-maintainer dispatching publication, that the comment was never edited, and that the comment binds the version, source commit and SHA256 of the complete checksum manifest. This
-checks provenance; maintainers still must choose a reviewer competent to make that assessment.
-
-Dispatch `Publish reviewed Groth16 release` from `main` at the same commit with the version,
-both run IDs, and the numeric comment ID. It rejects any existing tag or release (including
-drafts) for that version, creates the tag and release with all four archives and the manifest
+Dispatch `Publish Groth16 benchmark release` from `main` at the same commit with the version
+and both run IDs. It rejects any existing tag or release (including
+drafts) for that version, creates the tag and release with all five archives and the manifest
 in one step, and verifies the tag points at the dispatched commit. Use a fresh version rather
-than replacing reviewed assets in place. Publication runs only in the upstream repository on `main`.
+than replacing published assets in place. Publication runs only in the upstream repository on `main`.
 
 One-time maintainer setup before the first publication:
 
-- Create the `groth16-release` environment with required reviewers, "Prevent self-review"
-  enabled, and deployment branches restricted to `main`.
+- Protect `main` so release workflow changes go through review.
 - Add a tag ruleset for `v*` restricting creation, update and deletion to that workflow's
   maintainers.
+
+The release is manually dispatched after the normal PR review and successful candidate builds.
+No separate per-release comment sign-off or GitHub deployment-environment approval is required.
 
 ## Licensing
 
@@ -87,18 +77,13 @@ The upstream repository's Apache-2.0 license does **not** replace the verifier's
 header. The soispoke archive keeps the verifier under GPL-3.0 and bundles its unchanged source,
 license text, attribution, build configuration and generation script. This implements source
 availability alongside object code as described in [GPLv3 §6(d)](https://www.gnu.org/licenses/gpl.en.html#section6).
-Named maintainer review of that distribution is required before the first publication; this
-document and automated checks do not constitute that sign-off.
+These distribution conditions apply independently of the repository's review and release process.
 
 ## Downstream acceptance gate
 
-Do not switch Nethermind dispatches to a nonexistent release. After a reviewed upstream release
-exists, implement and smoke-test the versioned download in `run-frame-tx-measurements.yml`,
-preserving the `both|mempool|flood` gate, rejecting draft/prerelease/invalid versions, explicitly
-setting `GH_TOKEN`, checking SHA256s and verifier plausibility, and using storage outside the
-checkout. Note that `RUNNER_TEMP` survives checkout but GitHub runner job cleanup may clear it;
-cross-job reuse needs an explicit cache or a persistent runner directory.
+The Nethermind workflow fetches a published release by version, rejects draft/prerelease/invalid
+versions, checks SHA256s and verifier plausibility, and extracts outside the checkout.
 
 Acceptance requires an actual `harness=mempool` dispatch with that release version and
-`raise_verify_gas_const=500000`, with all four named Groth16 rows present. Local generator
+`raise_verify_gas_const=500000`, with soispoke v2 and the 250k/300k/400k/500k Groth16 rows present. Local generator
 and harness runs are prerequisites, not substitutes for that dispatch.

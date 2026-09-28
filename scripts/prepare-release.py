@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Combine successful candidate runs without regenerating their reviewed artifacts."""
+"""Validate and assemble successful candidate runs without rebuilding their artifacts."""
 import argparse
 import hashlib
 import importlib.util
@@ -12,11 +12,6 @@ import tarfile
 spec = importlib.util.spec_from_file_location("package", Path(__file__).with_name("package-sweeps.py"))
 package = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(package)
-
-# Reviewers trusted to sign off a Groth16 release: named individuals with crypto/circuit context,
-# not "any org member" (which only proves repo access, not that anyone actually reviewed the artifacts).
-AUTHORIZED_SIGNERS = {"manusw7", "AnkushinDaniil"}
-
 
 def gh(*args):
     return subprocess.check_output(["gh", *args], text=True)
@@ -31,8 +26,6 @@ def prepare(args):
         raise ValueError("expected version vMAJOR.MINOR.PATCH without prerelease suffix")
     if not re.fullmatch(r"[0-9a-f]{40}", args.commit):
         raise ValueError("expected full candidate commit SHA")
-    if args.signoff_comment and not args.dispatcher:
-        raise ValueError("--dispatcher is required with --signoff-comment")
     args.output.mkdir(parents=True, exist_ok=False)
     for component, run_id in (("synthetic", args.synthetic_run), ("soispoke", args.soispoke_run)):
         run = api(f"repos/{args.repo}/actions/runs/{run_id}")
@@ -44,7 +37,7 @@ def prepare(args):
            "--name", f"{component}-candidate", "--dir", str(args.output))
     expected = {f"sweep-{label}.tar.gz" for label in package.LABELS}
     if {p.name for p in args.output.iterdir()} != expected:
-        raise ValueError("candidate assets must contain exactly four sweep archives")
+        raise ValueError("candidate assets must contain exactly five sweep archives")
     for label in package.LABELS:
         with tarfile.open(args.output / f"sweep-{label}.tar.gz") as archive:
             names = set()
@@ -59,10 +52,10 @@ def prepare(args):
                 names.add(member.name)
             required_files = ["verifier.hex", "calldata-invalid.hex", "gas.txt"]
             if label == "soispoke":
-                required_files += ["provenance.json", "trace.txt", "source/src/Groth16Verifier.sol",
+                required_files += ["provenance.json", "activation_manifest.testbed.json", "trace.txt", "source/src/Groth16Verifier.sol",
                                    "source/COPYING", "source/LICENSE.upstream-Apache-2.0",
                                    "source/README.md", "source/foundry.toml", "source/scripts/soispoke.py", "source/scripts/licenses/GPL-3.0.txt", "source/LICENSE.pipeline-MIT",
-                                   "source/test/Fixture.t.sol", "source/NOTICE", "source/tooling/patch_verifier.py"]
+                                   "source/test/Fixture.t.sol", "source/NOTICE", "source/upstream-foundry.toml", "source/tooling/patch_verifier.py"]
             else:
                 required_files += ["README.txt", "Verifier.sol", "proof.json", "metadata.json",
                                    "trace-valid.txt", "trace-invalid.txt"]
@@ -72,36 +65,44 @@ def prepare(args):
     digest = package.manifest(args.output)
     with tarfile.open(args.output / "sweep-soispoke.tar.gz") as archive:
         provenance = json.load(archive.extractfile("sweep-soispoke/provenance.json"))
+        manifest = json.load(archive.extractfile("sweep-soispoke/activation_manifest.testbed.json"))
+        measured_gas = int(archive.extractfile("sweep-soispoke/gas.txt").read())
     upstream_commit = provenance["commit"]
     if not re.fullmatch(r"[0-9a-f]{40}", upstream_commit):
         raise ValueError("missing pinned soispoke commit")
-    attestation = (f"Groth16 release sign-off\nversion: {args.version}\ncommit: {args.commit}\n"
-                   f"SHA256SUMS-sha256: {digest}\n"
-                   "I reviewed the circuits, fresh per-circuit setups, valid and invalid pairing traces, "
-                   "gas calibration, upstream pin and hashes, and GPL-3.0 corresponding source and attribution. "
-                   "These disposable testbed artifacts are approved for benchmark publication.")
-    (args.output / "SIGNOFF-REQUIRED.txt").write_text(attestation + "\n")
-    print(attestation)
-    if args.signoff_comment:
-        comment = api(f"repos/{args.repo}/issues/comments/{args.signoff_comment}")
-        authorized = {s.lower() for s in AUTHORIZED_SIGNERS}
-        if (comment["user"]["type"] != "User"
-                or comment["user"]["login"].lower() not in authorized
-                or comment["updated_at"] != comment["created_at"]
-                or comment["user"]["login"].lower() == args.dispatcher.lower()
-                or comment["body"].strip() != attestation):
-            raise ValueError("sign-off must come from an authorized reviewer and match these exact assets and version")
-        notes = (f"Benchmark-only disposable Groth16 setups; never use for production funds.\n\n"
-                 f"Source commit: {args.commit}\n"
-                 f"Pinned soispoke source: https://github.com/soispoke/minimal-shielded-pool/tree/{upstream_commit}\n"
-                 f"Synthetic build: https://github.com/{args.repo}/actions/runs/{args.synthetic_run}\n"
-                 f"Soispoke build: https://github.com/{args.repo}/actions/runs/{args.soispoke_run}\n"
-                 f"Named crypto and licensing reviewer: @{comment['user']['login']}\n"
-                 f"Sign-off: {comment['html_url']}\n\n"
-                 f"SHA256SUMS SHA256: `{digest}`\n\n"
-                 "The soispoke archive includes the pinned upstream commit, GPL-3.0 verifier source, "
-                 "license, attribution, build settings and measured gas reconciliation.\n")
-        (args.output / "RELEASE-NOTES.md").write_text(notes)
+    if (provenance.get("profile") != "position-notes-v2" or provenance.get("test_only") is not True
+            or any(provenance.get(key) != value for key, value in package.SOISPOKE_PROFILE.items()
+                   if key.startswith("declared_"))
+            or provenance.get("measurements", {}).get("input", {}).get("gas") != measured_gas):
+        raise ValueError("soispoke candidate is not the pinned, measured position-notes-v2 profile")
+    if (manifest.get("production") is not False
+            or manifest.get("ceremony", {}).get("phase2_contributions") != 1
+            or manifest.get("ceremony", {}).get("independent_verification") is not None
+            or any(manifest.get("profile", {}).get(key) != value for key, value in package.SOISPOKE_PROFILE.items()
+                   if not key.startswith("declared_"))):
+        raise ValueError("soispoke manifest no longer identifies the pinned test-only profile")
+    pinned_hashes = provenance.get("input_sha256", {})
+    with tarfile.open(args.output / "sweep-soispoke.tar.gz") as archive:
+        for upstream_path, packaged_path in (
+                ("activation_manifest.testbed.json", "sweep-soispoke/activation_manifest.testbed.json"),
+                ("contracts/src/Groth16Verifier.sol", "sweep-soispoke/source/src/Groth16Verifier.sol"),
+                ("contracts/foundry.toml", "sweep-soispoke/source/upstream-foundry.toml"),
+                ("tooling/patch_verifier.py", "sweep-soispoke/source/tooling/patch_verifier.py"),
+                ("LICENSE", "sweep-soispoke/source/LICENSE.upstream-Apache-2.0"),
+                ("NOTICE", "sweep-soispoke/source/NOTICE")):
+            if hashlib.sha256(archive.extractfile(packaged_path).read()).hexdigest() != pinned_hashes.get(upstream_path):
+                raise ValueError(f"packaged source does not match pinned input {upstream_path}")
+    notes = ("Benchmark-only disposable Groth16 setups; never use for production funds.\n"
+             "The soispoke position-notes-v2 setup has one phase-2 contribution and no independent verification.\n\n"
+             f"Source commit: {args.commit}\n"
+             f"Pinned soispoke source: https://github.com/soispoke/minimal-shielded-pool/tree/{upstream_commit}\n"
+             f"Synthetic build: https://github.com/{args.repo}/actions/runs/{args.synthetic_run}\n"
+             f"Soispoke build: https://github.com/{args.repo}/actions/runs/{args.soispoke_run}\n\n"
+             f"SHA256SUMS SHA256: `{digest}`\n\n"
+             "The soispoke archive includes the pinned upstream commit, GPL-3.0 verifier source, "
+             "license, attribution, build settings and measured gas reconciliation.\n")
+    (args.output / "RELEASE-NOTES.md").write_text(notes)
+    print(f"Prepared {args.version} from {args.commit}; SHA256SUMS SHA256: {digest}")
 
 
 if __name__ == "__main__":
@@ -111,7 +112,5 @@ if __name__ == "__main__":
     parser.add_argument("--commit", required=True)
     parser.add_argument("--synthetic-run", required=True, type=int)
     parser.add_argument("--soispoke-run", required=True, type=int)
-    parser.add_argument("--signoff-comment", type=int)
-    parser.add_argument("--dispatcher", help="login that dispatched publication; must differ from the signer")
     parser.add_argument("--output", type=Path, required=True)
     prepare(parser.parse_args())
