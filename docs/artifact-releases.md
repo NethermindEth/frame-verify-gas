@@ -65,9 +65,10 @@ apply independently of the review process.
 
 The reviewer then posts the **exact contents** of `SIGNOFF-REQUIRED.txt` as a PR/issue comment
 in `NethermindEth/frame-verify-gas`. The publication script verifies the comment author's
-GitHub association is OWNER, MEMBER or COLLABORATOR, that it is a human account other than the
-maintainer dispatching publication, that the comment was never edited, and that the comment binds the version, source commit and SHA256 of the complete checksum manifest. This
-checks provenance; maintainers still must choose a reviewer competent to make that assessment.
+login is on the explicit reviewer allowlist, that it is a human account other than the maintainer
+dispatching publication, that the comment was never edited, and that the comment binds the version,
+source commit and SHA256 of the complete checksum manifest. This checks provenance; maintainers still
+must choose a reviewer competent to make that assessment.
 
 Dispatch `Publish reviewed Groth16 release` from `main` at the same commit with the version,
 both run IDs, and the numeric comment ID. It rejects any existing tag or release (including
