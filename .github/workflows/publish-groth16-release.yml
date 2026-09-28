@@ -34,7 +34,6 @@ jobs:
   publish:
     if: github.repository == 'NethermindEth/frame-verify-gas' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    environment: groth16-release
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6

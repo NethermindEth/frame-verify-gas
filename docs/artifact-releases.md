@@ -60,6 +60,9 @@ The new output directory contains five `sweep-*.tar.gz` assets, `SHA256SUMS`, an
   and gas scope. The profile is test-only, with one phase-2 contribution and no independent verification.
 - GPL-3.0 verifier attribution, unchanged source and equivalent source access in the same asset.
 
+This named sign-off is a repository release control, not a GPL requirement. The license conditions
+apply independently of the review process.
+
 The reviewer then posts the **exact contents** of `SIGNOFF-REQUIRED.txt` as a PR/issue comment
 in `NethermindEth/frame-verify-gas`. The publication script verifies the comment author's
 GitHub association is OWNER, MEMBER or COLLABORATOR, that it is a human account other than the
@@ -74,10 +77,12 @@ than replacing reviewed assets in place. Publication runs only in the upstream r
 
 One-time maintainer setup before the first publication:
 
-- Create the `groth16-release` environment with required reviewers, "Prevent self-review"
-  enabled, and deployment branches restricted to `main`.
+- Protect `main` so release workflow changes go through review.
 - Add a tag ruleset for `v*` restricting creation, update and deletion to that workflow's
   maintainers.
+
+The publish workflow uses the exact artifact sign-off as its human approval gate. It does not require
+a separate GitHub deployment-environment approval.
 
 ## Licensing
 
@@ -85,8 +90,8 @@ The upstream repository's Apache-2.0 license does **not** replace the verifier's
 header. The soispoke archive keeps the verifier under GPL-3.0 and bundles its unchanged source,
 license text, attribution, build configuration and generation script. This implements source
 availability alongside object code as described in [GPLv3 §6(d)](https://www.gnu.org/licenses/gpl.en.html#section6).
-Named maintainer review of that distribution is required before the first publication; this
-document and automated checks do not constitute that sign-off.
+The named maintainer sign-off described above is an internal release control, not a GPL condition.
+This document and automated checks do not constitute that sign-off.
 
 ## Downstream acceptance gate
 
